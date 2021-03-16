@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8">
+        <!-- <link rel="apple-touch-icon" sizes="180x180" href="../favicon/apple-touch-icon.png">
+        <link rel="icon" type="image/png" sizes="32x32" href="../favicon/favicon-32x32.png">
+        <link rel="icon" type="image/png" sizes="16x16" href="../favicon/favicon-16x16.png">
+        <link rel="manifest" href="../favicon/site.webmanifest"> -->
+        <title>Shape by Sound</title>
+        <style>
+            body {
+                margin: 0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+                background-color: rgb(141, 133, 143);
+            }
+            #info {
+              text-align: left;
+              background-color: transparent;
+              color: rgb(165, 166, 248);
+              margin: 10px;
+            }
+            canvas { width: 80%; height: 100%; }
+            input[type=range] { width: 100%; }
+            #container { position: relative; }
+            #container canvas, #overlay { position: absolute; }
+            #overlay { z-index: 1; width: 100%; }
+            #overlay div { padding: 5px; }
+            #loader {
+                border: 5px solid #f3f3f3; /* Light grey */
+                border-top: 5px solid #3d3d3d; /* Grey */
+                border-radius: 25%;
+                width: 40px;
+                height: 20px;
+                animation: spin 1s linear infinite;
+                position: absolute;
+                top: 25%;
+                left: 25%;
+                z-index: 2;
+                display: none; /* start hidden */
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+  
+      <div id="content">
+        <input type="file" id="thefile" accept="audio/*" />
+        <canvas id="canvas"></canvas>
+        <br>
+       <audio id="audio" controls></audio>
+       <div>
+           <button onclick="document.getElementById('audio').play()">Play</button>
+           <button onclick="document.getElementById('audio').pause()">Pause</button>
+           <div class="slidecontainer">
+               <input type="range" min="0" max="1000" value="0" class="slider" id="myRange" name="time">
+           </div>
+
+           <button onclick="document.getElementById('audio').volume += 0.1">volume +</button>
+           <button onclick="document.getElementById('audio').volume -= 0.1">volume -</button>
+
+           <div id="loader"></div> 
+<console class="log"></console>
+
+       </div>
+
+        <script type="module">
+
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.124.0/build/three.module.js'
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.124.0/examples/jsm/controls/OrbitControls.js'
+import { Rhino3dmLoader } from 'https://cdn.jsdelivr.net/npm/three@0.124.0/examples/jsm/loaders/3DMLoader.js'
+import rhino3dm from 'https://cdn.jsdelivr.net/npm/rhino3dm@0.15.0-beta/rhino3dm.module.js'
+import { RhinoCompute } from 'https://cdn.jsdelivr.net/npm/compute-rhino3d@0.13.0-beta/compute.rhino3d.module.js'
+
+const loader = new Rhino3dmLoader()
+loader.setLibraryPath( 'https://cdn.jsdelivr.net/npm/rhino3dm@0.15.0-beta/' )
+
+// initialise 'data' object that will be used by compute()
+const data = {
+  definition: 'sound_made_necklace3.gh',
+  inputs: {
+    'points':[] // start with an empty list (corresponds to "points" input)
+  }
+}
+
+//global
+let rhino, doc
+
+rhino3dm().then(async m => {
+  console.log('Loaded rhino3dm.')
+    rhino = m
+
+    
+    // // local 
+    // // RhinoCompute.url = 'http://localhost:8081/' // Rhino.Compute server url
+
+    // RhinoCompute.url = 'https://macad2021.compute.rhino3d.com/'
+    // RhinoCompute.apiKey = getApiKey() // needed when calling a remote RhinoCompute server
+
+    // source a .gh/.ghx file in the same directory
+    let url = data.definition
+    let res = await fetch(url)
+    let buffer = await res.arrayBuffer()
+    definition = new Uint8Array(Buffer)
+    
+    init()
+    compute()
+
+})
+
+// function getApiKey() {
+//     let auth = null
+//     auth = localStorage['compute_api_key']
+//     if (auth == null) {
+//         auth = window.prompt('RhinoCompute Server API Key')
+//         if (auth != null) {
+//             localStorage.setItem('compute_api_key', auth)
+//         }
+//     }
+//     return auth
+// }
+
+
+document.addEventListener('DOMContentLoaded', (event) => {
+  
+  var dataArray
+  var analyser
+  var ctx
+  var bufferLength
+  var totalDados = []
+  var dadosExportar = []
+  
+  
+  
+  window.onload = function() {
+    
+      var file = document.getElementById("thefile");
+      var audio = document.getElementById("audio");
+      
+      file.onchange = function(value) {
+  
+        //Create audio source and connect it to the input file
+        var files = this.files;
+        console.log('files => ', this.files)
+        audio.src = URL.createObjectURL(files[0]);
+        audio.load();
+        audio.play();
+        var context = new AudioContext();
+        var src = context.createMediaElementSource(audio);
+        analyser = context.createAnalyser();
+    
+        //Create and initialize drawing space
+        var canvas = document.getElementById("canvas");
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        ctx = canvas.getContext("2d");
+  
+  
+        //Connect audio node analyser and adjust settings
+        src.connect(analyser);
+        analyser.connect(context.destination);
+        analyser.fftSize = 2048;
+        analyser.smoothingTimeConstant = 0.9;
+        //analyser.minDecibels = -90;
+        //analyser.maxDecibels = -10;
+        
+        //Variable information used for drawing the bands of the visualizer
+        //Default audio context includes frequencies well above the audible range.
+        //To adjust this we truncate frequencyBinCount to include only audible frequencies.
+        //This results in a more pleasing aesthetic.
+        bufferLength = Math.floor(analyser.frequencyBinCount/ 1.50); 
+        dataArray = new Uint8Array(bufferLength);
+        var WIDTH = canvas.width;
+        var HEIGHT = canvas.height;
+        var barWidth = (WIDTH / bufferLength);
+  
+        //Print information for debugging.
+        console.log("Buffer Length: ", bufferLength);
+        console.log("HEIGHT: ", HEIGHT);
+        console.log("WIDTH: ", WIDTH);
+        console.log("barWidth: ", barWidth);
+        console.log("maxDB: ", analyser.maxDecibels);
+        console.log("minDB: ", analyser.minDecibels);
+        console.log("sampleRate: ", context.sampleRate);
+        console.log("Smoothing Time Constant: ", analyser.smoothingTimeConstant);
+        gettingData()
+  
+        function gettingData () {
+          var drawVisual = requestAnimationFrame(gettingData);
+          analyser.getByteTimeDomainData(dataArray);
+          totalDados.push(dataArray)
+        }
+  
+        audio.addEventListener('pause', () => {
+          grafico()
+          compute()
+          console.log('dados exportar => ', dadosExportar)
+        })
+  
+        function grafico () {
+          ctx.fillStyle = 'rgb(200, 200, 200)';
+          ctx.fillRect(0, 0, 400, 400);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgb(0, 0, 0)';
+          ctx.beginPath();
+          var sliceWidth = 400 * 1.0 / bufferLength;
+          var x = 0;
+  
+          for (var b = 0; b < totalDados.length; b++) {
+              for(var i = 0; i < totalDados[b].length; i++) {
+  
+                  var v = dataArray[i] / 128.0;
+                  var y = v * 400/2;
+      
+                  if(i === 0) {
+                    const pt = "{\"X\":"+x+",\"Y\":"+y+",\"Z\":"+0+"}"
+                    data.inputs["points"].push(pt)
+                  ctx.moveTo(x, y);
+                  } else {
+                    const pt = "{\"X\":"+x+",\"Y\":"+y+",\"Z\":"+0+"}"
+                      data.inputs["points"].push(pt)
+                  ctx.lineTo(x, y);
+                  }
+      
+                  x += sliceWidth;
+              }
+          }
+  
+          ctx.lineTo(canvas.width, canvas.height/2);
+          ctx.stroke();
+        }
+      };
+    };
+  
+
+    let _threeMesh, _threeMaterial
+    
+async function compute() {
+      let t0 = performance.now()
+      const timeComputeStart = t0
+
+// showSpinner(true)
+
+let params=[]
+for(let i =0;i<=30;i++){
+  params.push(data.inputs.points[i])
+}
+
+data.inputs.points = params
+
+// use POST request
+const request = {
+  'method':'POST',
+  'body': JSON.stringify(data),
+  'headers': {'Content-Type': 'application/json',
+}
+}
+//aqui ele manda os dados para o solve 
+try {
+    const response = await fetch('/solve', request)
+  
+    if(!response.ok) {
+      // TODO: check for errors in response json
+      throw new Error(response.statusText)
+    }
+
+    const responseJson = await response.json()
+
+    let t1 = performance.now()
+    const computeSolveTime = t1 - timeComputeStart
+    t0 = t1
+
+    collectResults(responseJson)
+
+  } catch(error) {
+    console.error(error)
+  }
+}
+
+function collectResults(responseJson) {
+
+  let data = JSON.parse(responseJson.values[0].InnerTree['{ 0; }'][0].data)
+  let mesh = rhino.DracoCompression.decompressBase64String(data)
+      
+  t1 = performance.now()
+    const decodeMeshTime = t1 - t0
+    t0 = t1
+
+    if (!_threeMaterial) {
+      _threeMaterial = new THREE.MeshNormalMaterial()
+    }
+    let threeMesh = meshToThreejs(mesh, _threeMaterial)
+    mesh.delete()
+    replaceCurrentMesh(threeMesh)
+
+    t1 = performance.now()
+    const rebuildSceneTime = t1 - t0
+
+    console.group(`[call compute and rebuild scene] = ${Math.round(t1-timeComputeStart)} ms`)
+    //console.log(`[call compute and rebuild scene] = ${Math.round(t1-timeComputeStart)} ms`)
+    console.log(`  ${Math.round(computeSolveTime)} ms: appserver request`)
+    let timings = headers.split(',')
+    let sum = 0
+    timings.forEach(element => {
+      let name = element.split(';')[0].trim()
+      let time = element.split('=')[1].trim()
+      sum += Number(time)
+      if (name === 'network') {
+        console.log(`  .. ${time} ms: appserver<->compute network latency`)
+      } else {
+        console.log(`  .. ${time} ms: ${name}`)
+      }
+    })
+    console.log(`  .. ${Math.round(computeSolveTime - sum)} ms: local<->appserver network latency`)
+    console.log(`  ${Math.round(decodeMeshTime)} ms: decode json to rhino3dm mesh`)
+    console.log(`  ${Math.round(rebuildSceneTime)} ms: create threejs mesh and insert in scene`)
+    console.groupEnd()
+
+
+}
+
+var scene, camera, renderer, controls
+
+function init () {
+  // Rhino models are z-up, so set this as the default
+  THREE.Object3D.DefaultUp = new THREE.Vector3( 0, 0, 1 );
+
+  scene = new THREE.Scene()
+  scene.background = new THREE.Color(1,1,1)
+  camera = new THREE.PerspectiveCamera( 45, window.innerWidth/window.innerHeight, 1, 1000 )
+
+  renderer = new THREE.WebGLRenderer({antialias: true})
+  renderer.setPixelRatio( window.devicePixelRatio )
+  renderer.setSize( window.innerWidth, window.innerHeight )
+  document.body.appendChild(renderer.domElement)
+
+  controls = new OrbitControls( camera, renderer.domElement  )
+
+  camera.position.z = 50
+
+  window.addEventListener( 'resize', onWindowResize, false )
+
+  animate()
+}
+var animate = function () {
+  requestAnimationFrame( animate )
+  controls.update()
+  renderer.render( scene, camera )
+}
+
+function onWindowResize() {
+  camera.aspect = window.innerWidth / window.innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize( window.innerWidth, window.innerHeight )
+  animate()
+}
+
+function replaceCurrentMesh (threeMesh) {
+  if (_threeMesh) {
+    scene.remove(_threeMesh)
+    _threeMesh.geometry.dispose()
+  }
+  _threeMesh = threeMesh
+  scene.add(_threeMesh)
+}
+
+function meshToThreejs (mesh, material) {
+  let loader = new THREE.BufferGeometryLoader()
+  var geometry = loader.parse(mesh.toThreejsJSON())
+  return new THREE.Mesh(geometry, material)
+}
+
+
+
+})
+
+        </script>
+
+   </body>
